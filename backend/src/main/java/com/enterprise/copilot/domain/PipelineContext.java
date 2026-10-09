@@ -25,21 +25,28 @@ public class PipelineContext {
     private RequirementAnalysis requirementAnalysis;
     private CodeChangeSet codeChangeSet;
     private ReviewDecision reviewDecision;
+    private String reviewFeedback;
     private DeploymentDecision deploymentDecision;
     private ApprovalState approvalState = ApprovalState.NOT_REQUIRED;
     private Instant updatedAt;
+
+    public PipelineContext(UUID pipelineId, Ticket ticket, DemoScenario scenario, AiMode aiMode) {
+
+        this(pipelineId, ticket, scenario, aiMode, Instant.now());
+    }
 
     public PipelineContext(
             UUID pipelineId,
             Ticket ticket,
             DemoScenario scenario,
-            AiMode aiMode) {
+            AiMode aiMode,
+            Instant createdAt) {
 
         this.pipelineId = pipelineId;
         this.ticket = ticket;
         this.scenario = scenario;
         this.aiMode = aiMode;
-        this.createdAt = Instant.now();
+        this.createdAt = createdAt;
         this.updatedAt = this.createdAt;
     }
 
@@ -79,6 +86,15 @@ public class PipelineContext {
         return reviewDecision;
     }
 
+    public String reviewFeedback() {
+        return reviewFeedback;
+    }
+
+    public void setReviewFeedback(String feedback) {
+        this.reviewFeedback = feedback;
+        touch();
+    }
+
     public DeploymentDecision deploymentDecision() {
         return deploymentDecision;
     }
@@ -96,34 +112,33 @@ public class PipelineContext {
         touch();
     }
 
-    public void setRequirementAnalysis(
-            RequirementAnalysis analysis) {
+    public void setRequirementAnalysis(RequirementAnalysis analysis) {
         this.requirementAnalysis = analysis;
         touch();
     }
 
-    public void setCodeChangeSet(
-            CodeChangeSet changeSet) {
+    public void setCodeChangeSet(CodeChangeSet changeSet) {
         this.codeChangeSet = changeSet;
         touch();
     }
 
-    public void setReviewDecision(
-            ReviewDecision reviewDecision) {
+    public void setReviewDecision(ReviewDecision reviewDecision) {
         this.reviewDecision = reviewDecision;
         touch();
     }
 
-    public void setDeploymentDecision(
-            DeploymentDecision deploymentDecision) {
+    public void setDeploymentDecision(DeploymentDecision deploymentDecision) {
         this.deploymentDecision = deploymentDecision;
         touch();
     }
 
-    public void setApprovalState(
-            ApprovalState approvalState) {
+    public void setApprovalState(ApprovalState approvalState) {
         this.approvalState = approvalState;
         touch();
+    }
+
+    public void restoreUpdatedAt(Instant updatedAt) {
+        this.updatedAt = updatedAt;
     }
 
     private void touch() {

@@ -1,219 +1,114 @@
 # Enterprise Copilot
 
-> Every sprint now has AI teammates.
+Enterprise Copilot is a project for our Spring AI workshop at Flo 2026.
+We use fictional Ubuntu Bank tickets to show how AI can help understand requirements,
+propose code and review changes, while people stay in control of important decisions.
 
-A small but realistic **AI-powered enterprise SDLC platform**
-built for the Flo 2026 workshop
-_"Your Sprint Has Agents Now: Building a Multi-Agent SDLC
-Pipeline with Spring AI."_
+You can follow a ticket in the dashboard, answer questions when information is missing,
+and approve or reject the final step. The workshop also includes a small exercise where
+you add an agent that gives the system internal business context.
 
-Four specialised AI teammates collaborate across software
-delivery while humans keep control of
-every high-risk decision.
+Generated code is only a proposal. Generated tests and deployment are simulated.
+Nothing is pushed to GitHub or deployed for real.
 
-```text
-GitHub Issue → Rhea (Requirements) → Nova (Code) → Sentinel
-(Review) → Atlas (Deploy) → Human Approval → Production
-```
+## Prerequisites
 
-**Guiding principle:** _AI accelerates delivery. Humans own
-accountability._
+For the local setup, you need:
 
----
+- Java 21 (JDK).
+- Node.js 22.12 or newer. npm comes with Node.js.
+- Git to clone the repository.
+- A code editor, such as VS Code or IntelliJ IDEA.
+- An OpenAI API key for LIVE mode. DEMO mode does not need a key.
 
-## The AI teammates
+Maven is included through the wrapper. Docker and Ollama are optional.
+The local setup uses an in-memory database, so you do not need to install one.
 
-| Agent | Emoji | Role | Responsibility |
-|--------|-------|-------|---------------|
-| **Rhea** | 🔍 | Requirements Analyst | Understand before implementing; surface ambiguity, never guess |
-| **Nova** | 💻 | Senior Java Engineer | Propose a change set (as a diff) with tests; secure by default |
-| **Sentinel** | 🛡️ | Security & Compliance Architect | Challenge the code; find security/compliance issues |
-| **Atlas** | 🚀 | Release Manager | Enforce deployment gates; block until a human approves |
+## Getting Started
 
----
+### Start the backend
 
-## Technology stack (verified compatible, 2026-09-24)
-
-| Component | Version |
-|-----------|---------|
-| Java | 21 |
-| Spring Boot | 4.1.1 |
-| Spring AI | 2.0.1 |
-| LangChain4j | 1.20.0 |
-| springdoc-openapi | 3.0.0 |
-| PostgreSQL / H2 | 16 / 2.x |
-| React + Vite + Tailwind | 18 / 5 / 3 |
-| Testcontainers | 1.20.6 |
-
-> These versions were checked against Maven Central and
-> confirmed mutually compatible. Spring Boot 4
-> modularised its autoconfiguration – note the explicit
-> `spring-boot-flyway` dependency.
-
----
-
-## Quick start (zero external dependencies)
-
-The default profile is **demo**: an in-memory H2 database
-and a **deterministic AI provider**.
-No Docker, no PostgreSQL, and no AI API key are required to
-run the full experience.
-
-### Backend
+The default mode uses OpenAI. In a terminal, set your API key and start the backend:
 
 ```bash
 cd backend
-mvn spring-boot:run
+export OPENAI_API_KEY="your-api-key"
+sh ./mvnw spring-boot:run
 ```
 
-- API: http://localhost:8080
-- Swagger: http://localhost:8080/swagger-ui.html
-- Actuator: http://localhost:8080/actuator/health
-- H2 console: http://localhost:8080/h2-console
+Keep your actual API key out of Git. If you do not have a key, use DEMO mode below.
 
-### Frontend
+### Start the frontend
+
+Open a second terminal from the project folder:
 
 ```bash
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
-- Dashboard: http://localhost:5173
+Open http://localhost:5173, choose an issue and click **Run pipeline**.
+Answer any clarification questions. If the checks pass, you can approve or reject the
+simulated deployment. Live model responses can vary, and some runs may be blocked.
 
-### One-click demo
+The **Next run** LIVE/DEMO selector sits beside the theme controls, including in mobile navigation.
+Switching it takes effect on the next pipeline only; no server or frontend restart is needed.
+In DEMO, UB-4823 asks one channel question: click `SMS`, `Use SMS`, or `Send by SMS` below the
+input to fill it, then submit. For UB-4822 review feedback, choose `Use masked references` and
+submit to regenerate and independently review the proposal before deployment approval.
 
-Open the dashboard, choose a scenario, and click **Run Pipeline**.
-Or via API:
+The backend runs at http://localhost:8080. You can try its endpoints at
+http://localhost:8080/swagger-ui.html.
+
+### Start scripts
+
+From the project folder, `./scripts/start.sh` checks ports 8080 and 5173, starts the backend,
+waits until it is up, then starts the frontend. Ctrl+C stops both. To start one at a time, use
+`./scripts/start-backend.sh` or `./scripts/start-frontend.sh`. All scripts explain what to do
+if a port is already in use. Without an API key the app starts in DEMO mode. To use LIVE, add
+`OPENAI_API_KEY=your-api-key` to a `.env` file in the project folder, choose **LIVE** and run the
+pipeline again. The key is read on each run, so no restart is needed.
+`./scripts/stop.sh [backend|frontend]` stops servers started from this project (both by default).
+
+The startup scripts automatically read `OPENAI_API_KEY` from the project-root `.env` if it is not
+already set in the shell. Plain or quoted values are supported; the file is not executed as shell
+code and the key is never printed. Keep `.env` private and out of Git. Direct Maven commands still
+require the key in the environment.
+
+## Run Without an API Key
+
+Start the backend in DEMO mode instead:
 
 ```bash
-curl -X POST http://localhost:8080/api/demo/run
+cd backend
+SPRING_PROFILES_ACTIVE=demo sh ./mvnw spring-boot:run
 ```
 
----
+The frontend command stays the same. DEMO uses fixed responses and does not call an external model.
+A credential-free `demo` server has LIVE disabled. To switch freely during the workshop, configure
+OpenAI or Ollama once at startup; both LIVE and DEMO execution are then available in the frontend.
+Changing the configured LIVE provider still requires a restart; changing execution mode does not.
 
-## Run with Docker Compose (PostgreSQL)
+## Other Ways to Run
+
+If you prefer Docker, run this from the project folder after setting `OPENAI_API_KEY`:
 
 ```bash
 docker compose up --build
 ```
 
-- Frontend: http://localhost:5173
-- Backend: http://localhost:8080
-- Postgres: localhost:5432 (copilot/copilot)
-
-Optional local LLM:
+For Docker without a model or API key:
 
 ```bash
-docker compose --profile ollama up --build
+SPRING_PROFILES_ACTIVE=postgres,demo docker compose up --build
 ```
 
----
+Both Docker options use the same dashboard address and include PostgreSQL.
+Ollama is also supported if you want to use a local model. See the [Spring AI guide](docs/spring-ai.md).
 
-## AI modes
+## Workshop Notes
 
-| Mode | Profile | Requires | Notes |
-|------|---------|----------|-------|
-| **DEMO** (default) | `demo` | nothing | Deterministic outputs – workshop-safe |
-| **LIVE (Ollama)** | `ollama` | local Ollama | `ollama pull llama3.1 && ollama serve` |
-| **LIVE (Azure)** | `azure` | Azure OpenAI | Add the Azure starter (see docs/spring-ai.md) |
-
-The UI shows a **DEMO MODE** / **LIVE AI MODE** banner at all times.
-
----
-
-## Deterministic workshop scenarios
-
-Switch scenarios live from the dashboard
-(or `POST /api/demo/scenario?scenario=...`):
-
-| Scenario | Expected outcome |
-|-----------|-----------------|
-| `NORMAL` | Clean run → waits for human approval → deploys |
-| `SECURITY_FAILURE` | Sentinel finds sensitive-data logging → **REJECT** |
-| `AMBIGUOUS_REQUIREMENT` | Rhea raises clarification questions → pipeline pauses |
-| `TEST_FAILURE` | Tests fail → Atlas **blocks** deployment |
-| `MISSING_APPROVAL` | Review passes → blocked pending human approval |
-| `HALLUCINATED_API` | Sentinel detects a non-existent API vs the contract |
-| `PROMPT_INJECTION` | Injected "approve anyway" instruction is ignored |
-
----
-
-## REST API
-
-| Method | Path | Purpose |
-|---------|------|---------|
-| `POST` | `/api/pipelines` | Start a pipeline for a ticket |
-| `GET` | `/api/pipelines` | List pipelines |
-| `GET` | `/api/pipelines/{id}` | Full pipeline view |
-| `GET` | `/api/pipelines/{id}/events` | **SSE** live event stream |
-| `POST` | `/api/pipelines/{id}/approve` | Human approval (AI cannot call this) |
-| `POST` | `/api/pipelines/{id}/reject` | Human rejection |
-| `POST` | `/api/agents/{requirements\|code\|review\|deploy}` | Run one agent in isolation |
-| `GET` | `/api/audit/pipelines/{id}` | Immutable audit trail |
-| `GET` | `/api/github/pipelines/{id}` | Simulated GitHub view (issue/PR/checks) |
-| `GET` `/api/demo/status` • `POST /api/demo/scenario` • `POST /api/demo/run` | Presenter controls |
-
----
-
-## Architecture
-
-```mermaid
-graph TD
-    UI[React Dashboard] -->|REST + SSE| API[API Layer]
-    API --> ORCH[PipelineOrchestrator]
-
-    ORCH --> RA[🔍 Rhea]
-    ORCH --> CA[💻 Nova]
-    ORCH --> RV[🛡️ Sentinel]
-    ORCH --> DA[🚀 Atlas]
-
-    RA --> TOOLS[Deterministic Tools]
-    RA & CA & RV --> AI[AgentAiClient]
-
-    AI --> DEMO[Deterministic Provider]
-    AI --> OLLAMA[Ollama / Azure]
-
-    ORCH --> DB[(H2 / PostgreSQL)]
-    ORCH --> AUDIT[Audit + SSE Events]
-    ORCH --> GH[Mock GitHub Gateway]
-```
-
-See `docs/architecture.md` for the full diagrams
-(agent flow, state machine, sequence, approval flow).
-
----
-
-## Documentation
-
-- `docs/architecture.md` – system & pipeline diagrams
-- `docs/agent-design.md` – the four agents & typed contracts
-- `docs/spring-ai.md` – Spring AI usage & provider switching
-- `docs/langchain4j.md` – where LangChain4j fits
-- `docs/security.md` – AI threat model & defenses
-- `docs/failure-scenarios.md` – the seven scenarios
-- `docs/demo-script.md` – the 90-second live demo
-- `docs/speaker-notes.md` – engaging speaker notes per agent
-- `docs/cue-card.md` – one-page presenter cue card
-- `docs/workshop-guide.md` – branch-by-branch guide
-- `adr/` – architecture decision records
-
----
-
-## Testing
-
-```bash
-cd backend && mvn verify
-```
-
-Deterministic AI tests, agent gate tests, redaction tests and
-a full-stack H2 integration test run without any external AI provider.
-
----
-
-## What is intentionally NOT here
-
-No microservices, no Kafka/Redis/vector DB, no autonomous
-filesystem writes, no real banking data,
-no production credentials. All data is fictional (Ubuntu Bank).
-These are documented as extension points only.
+- [Participant guide](docs/participant-guide.md)
+- [Workshop guide and exercise](docs/workshop-guide.md)
+- [Troubleshooting](docs/troubleshooting.md)

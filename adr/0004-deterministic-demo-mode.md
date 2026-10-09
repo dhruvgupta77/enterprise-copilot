@@ -14,17 +14,20 @@ network issues.
 
 ## Decision
 
-The default `demo` profile uses a **deterministic AI
-provider** (`DemoAgentAiClient` +
-`DemoResponses`) that returns canonical UB-4821 outputs per
-scenario. The same agent code paths run in
-LIVE mode against a real model (Ollama or Azure). The UI
-always shows a DEMO/LIVE banner.
+OpenAI LIVE is the default workshop experience. Ollama LIVE is the explicit local alternative.
+`DemoAgentAiClient` and `DemoResponses` are always available. The presenter selects LIVE or DEMO
+for the next run from the frontend; `RoutingAgentAiClient` dispatches using that run's saved mode.
+OpenAI/Ollama profiles configure the real provider, not exclusive execution paths. The `demo`
+profile remains the credential-free option, with LIVE unavailable unless a real provider is configured.
+The same first three agent/orchestrator paths run in LIVE; Atlas is always deterministic Java.
+The UI identifies the provider. LIVE failures are retried; DEMO output is substituted only when
+`COPILOT_AI_FALLBACK=demo` is set, and then visibly (fallback event, header badge, audit record) for
+the rest of that run. Azure is deferred.
 
 ## Consequences
 
-- The workshop runs with zero external dependencies and is
-  100% reproducible.
+- The DEMO preview runs without model credentials/services and has reproducible outcomes.
 - Scenarios are testable in CI without API keys.
-- LIVE mode remains a one-profile switch for authenticity.
+- LIVE is primary; scenario guarantees apply only to runs captured in DEMO mode.
+- Switching execution mode requires no restart and never changes an existing run or its recovery steps.
 `

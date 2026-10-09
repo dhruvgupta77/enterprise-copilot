@@ -1,73 +1,71 @@
 import React, { useEffect, useRef } from 'react';
+import { GATE_LABELS } from '@/lib/pipeline';
+import { cn } from '@/lib/utils';
 
-const AGENT_STYLE = {
-    Rhea: 'text-sky-300',
-    Nova: 'text-violet-300',
-    Sentinel: 'text-emerald-300',
-    Atlas: 'text-orange-300',
-    Human: 'text-amber-300',
-    System: 'text-slate-400'
+const LABELS = {
+    PIPELINE_STARTED: 'Pipeline started',
+    AGENT_STARTED: 'Started',
+    AGENT_THINKING: 'Step',
+    TOOL_INVOKED: 'Reference consulted',
+    AGENT_COMPLETED: 'Assessment complete',
+    FINDING_CREATED: 'Finding identified',
+    GATE_BLOCKED: 'Gate blocked',
+    GATE_EVALUATED: 'Gate evaluated',
+    APPROVAL_REQUIRED: 'Approval needed',
+    APPROVAL_GRANTED: 'Human approved',
+    APPROVAL_REJECTED: 'Human rejected',
+    DEPLOYMENT_STARTED: 'Deployment started',
+    DEPLOYMENT_COMPLETED: 'Deployment complete',
+    PIPELINE_COMPLETED: 'Pipeline complete',
+    PIPELINE_FAILED: 'Execution stopped',
+    AI_FALLBACK: 'Fell back to DEMO',
 };
 
-const TYPE_BADGE = {
-    FINDING_CREATED: 'bg-danger/20 text-danger',
-    GATE_BLOCKED: 'bg-danger/20 text-danger',
-    APPROVAL_REQUIRED: 'bg-warn/20 text-warn',
-    APPROVAL_GRANTED: 'bg-ok/20 text-ok',
-    DEPLOYMENT_COMPLETED: 'bg-ok/20 text-ok',
-    PIPELINE_COMPLETED: 'bg-ok/20 text-ok',
-    PIPELINE_FAILED: 'bg-danger/20 text-danger'
-};
-
-export default function AgentActivity({ events }) {
-    const endRef = useRef(null);
+// The parent supplies one shared presentation cursor for every agent section.
+export default function AgentActivity({ entries = [], agent, follow = true }) {
+    const viewportRef = useRef(null);
     useEffect(() => {
-        endRef.current?.scrollIntoView({
-            behavior: 'smooth'
-        });
-    }, [events]);
-
+        if (follow && viewportRef.current) {
+            viewportRef.current.scrollTop = viewportRef.current.scrollHeight;
+        }
+    }, [entries.length, follow]);
+    if (!entries.length) return null;
     return (
-        <div className="flex flex-col h-full">
-            <div className="px-4 py-3 border-b border-edge text-sm font-semibold text-slate-200">
-                Live Agent Activity
-            </div>
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                {events.length === 0 && (
-                    <div className="text-slate-500 text-sm">
-                        Run the pipeline to see AI teammates collaborate.
-                    </div>
-                )}
-                {events.map((e, i) => (
-                    <div
-                        key={i}
-                        className="rounded-lg bg-panel2 border border-edge p-3"
-                    >
-                        <div className="flex items-center justify-between">
-                            <span
-                                className={`text-sm font-semibold ${
-                                    AGENT_STYLE[e.agent] || 'text-slate-300'
-                                }`}
-                            >
-                                {e.agent}
+        <div ref={viewportRef} role="log" aria-label={`${agent} execution history`}
+            aria-live="polite" aria-relevant="additions" tabIndex={0}
+            className="mb-6 max-h-[60vh] overflow-y-auto overscroll-contain rounded-lg border bg-card/40 p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:p-5">
+            <ol className="ml-1 space-y-5 pl-5">
+                {entries.map(({ event, explanation, meaningful, step, index }) => (
+                    <li key={index} data-presentation-index={index} className="relative">
+                        <span className={cn('absolute -left-[25px] top-1.5 h-2 w-2 rounded-full border border-background',
+                            ['GATE_BLOCKED', 'PIPELINE_FAILED'].includes(event.type) || event.data?.severity === 'CRITICAL'
+                                ? 'bg-destructive' : event.type === 'APPROVAL_REQUIRED' || event.type === 'AI_FALLBACK'
+                                  ? 'bg-warning' : 'bg-primary/70')} />
+                        <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+                            <span className="text-xs font-medium text-muted-foreground" title={event.type}>
+                                Real event · {event.agent} · {LABELS[event.type] || 'Activity recorded'}
                             </span>
-                            <span
-                                className={`text-[10px] px-2 py-0.5 rounded ${
-                                    TYPE_BADGE[e.type] ||
-                                    'bg-edge text-slate-300'
-                                }`}
-                            >
-                                {e.type}
-                            </span>
+                            <time className="text-xs tabular-nums text-muted-foreground">
+                                {new Date(event.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                            </time>
                         </div>
-                        <div className="mt-1 text-sm text-slate-300 leading-snug">
-                            {e.message}
-                        </div>
-                    </div>
-
+                        <p className="break-anywhere text-sm font-medium leading-6">
+                            {event.type === 'GATE_EVALUATED'
+                                ? `${GATE_LABELS[event.data?.gate] || event.data?.gate}: ${event.data?.waiting ? 'waiting for a human' : event.data?.passed ? 'passed' : 'failed'}`
+                                : ['DEPLOYMENT_STARTED', 'DEPLOYMENT_COMPLETED'].includes(event.type)
+                                  ? `Simulated deployment ${event.type === 'DEPLOYMENT_STARTED' ? 'started' : 'completed'}.`
+                                  : event.message}
+                        </p>
+                        {explanation && <div className="mt-2 space-y-2 text-sm leading-6 text-muted-foreground">
+                            <p className="text-xs font-medium text-primary">Educational explanation{meaningful ? ` · Step ${step}` : ' · Detail'} · {explanation.title}</p>
+                            <p className="break-anywhere font-mono text-xs leading-5 text-foreground">{explanation.component}</p>
+                            <p><span className="font-medium text-foreground">What: </span>{explanation.what}</p>
+                            <p><span className="font-medium text-foreground">Why: </span>{explanation.why}</p>
+                            {explanation.springAi && <p><span className="font-medium text-foreground">Spring AI: </span>{explanation.springAi}</p>}
+                        </div>}
+                    </li>
                 ))}
-                <div ref={endRef} />
-            </div>
+            </ol>
         </div>
     );
 }

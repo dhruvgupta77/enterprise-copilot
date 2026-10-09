@@ -1,53 +1,109 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 import Sidebar from './components/Sidebar.jsx';
 import PipelineStages from './components/PipelineStages.jsx';
-import AgentActivity from './components/AgentActivity.jsx';
-import DiffViewer from './components/DiffViewer.jsx';
 import Findings from './components/Findings.jsx';
 import ApprovalPanel from './components/ApprovalPanel.jsx';
+import PageHeader from './components/PageHeader.jsx';
+import PipelineAlert from './components/PipelineAlert.jsx';
+import RequirementsResult from './components/RequirementsResult.jsx';
+import CodeProposal from './components/CodeProposal.jsx';
+import WorkspaceViews from './components/WorkspaceViews.jsx';
+import { Button } from './components/ui/button';
+import { useWorkshopPlayback } from './lib/useWorkshopPlayback';
+import { presentationDelay, presentationPipeline, presentationSections, workshopEntries } from './lib/workshop';
+import { TooltipProvider } from './components/ui/tooltip';
+import { Skeleton } from './components/ui/skeleton';
 
 import { api, streamEvents } from './api.js';
+import { ACTIVE_STATES } from './lib/pipeline.js';
 
-const TERMINAL_STATES = [
-    'DEPLOYED',
-    'BLOCKED',
-    'FAILED'
-];
+const TERMINAL_STATES = ['DEPLOYED', 'BLOCKED', 'FAILED'];
 
 export default function App() {
-
     const [status, setStatus] = useState(null);
-    const [scenario, setScenario] = useState('NORMAL');
+    const [issues, setIssues] = useState([]);
+    const [selectedIssue, setSelectedIssue] = useState('UB-4821');
     const [pipeline, setPipeline] = useState(null);
     const [events, setEvents] = useState([]);
     const [nav, setNav] = useState('dashboard');
+    const [presentationPace, setPresentationPace] = useState(0);
+    const [followLatest, setFollowLatest] = useState(true);
+    const outputRef = useRef(null);
+    const entries = useMemo(() => presentationSections(workshopEntries(events, pipeline?.aiMode || status?.aiMode)), [events, pipeline?.aiMode, status?.aiMode]);
+    const paced = presentationPace > 0;
+    const { count, skip, skipped } = useWorkshopPlayback(entries, pipeline?.id, paced, presentationDelay(presentationPace));
+    const visibleEntries = entries.slice(0, count);
+    const visibleEvents = visibleEntries.map((entry) => entry.event);
+    const displayedPipeline = paced ? presentationPipeline(pipeline, events, count) : pipeline;
+    const resultVisibility = [displayedPipeline?.requirementAnalysis, displayedPipeline?.codeChangeSet, displayedPipeline?.reviewDecision]
+        .map(Boolean).join(':');
+    const lastEntry = visibleEntries.at(-1);
+    const activity = (agent) => ({
+        entries: visibleEntries.filter((entry) => entry.section === agent),
+        agent, follow: followLatest,
+    });
+    useEffect(() => {
+        if (!followLatest || nav !== 'dashboard' || !lastEntry || !outputRef.current) return;
+        // Let presenters fill human-input forms without later events moving the page.
+        if (document.activeElement?.closest('form, [data-human-controls]')) return;
+        const result = lastEntry.event.type === 'AGENT_COMPLETED'
+            ? outputRef.current.querySelector(`[data-result-for="${lastEntry.event.agent}"]`) : null;
+        const event = outputRef.current.querySelector(`[data-presentation-index="${count - 1}"]`);
+        (result || event?.closest('[role="log"]'))?.scrollIntoView({ block: 'nearest' });
+    }, [count, followLatest, nav, pipeline?.id, resultVisibility]);
 
     const [pipelines, setPipelines] = useState([]);
     const [audit, setAudit] = useState([]);
     const [github, setGithub] = useState(null);
+    const [error, setError] = useState('');
+    const [busy, setBusy] = useState(false);
+    const [loading, setLoading] = useState(true);
+    const [pendingAction, setPendingAction] = useState('');
 
     const sourceRef = useRef(null);
     const pollRef = useRef(null);
+    const actionRef = useRef(false);
+    const selectedRef = useRef(null);
 
     useEffect(() => {
-
-        api.status().then((s) => {
-            setStatus(s);
-            setScenario(s.scenario);
-        });
-
-        refreshList();
+        let cancelled = false;
+        async function initialize() {
+            try {
+                const current = await api.status();
+                if (cancelled) return;
+                setStatus(current);
+                const backlog = await api.demoIssues();
+                if (cancelled) return;
+                setIssues(backlog);
+                const list = await api.listPipelines();
+                if (cancelled) return;
+                setPipelines(list);
+                if (list[0]) {
+                    if (backlog.some((issue) => issue.key === list[0].ticket.key)) {
+                        setSelectedIssue(list[0].ticket.key);
+                    }
+                    setPipeline(list[0]);
+                    connect(list[0].id);
+                    await refresh(list[0].id);
+                }
+            } catch (err) {
+                if (!cancelled) setError(err);
+            } finally {
+                if (!cancelled) setLoading(false);
+            }
+        }
+        initialize();
 
         return () => {
+            cancelled = true;
+            selectedRef.current = null;
             sourceRef.current?.close();
             clearInterval(pollRef.current);
         };
-
     }, []);
 
     async function refreshList() {
-
         try {
             setPipelines(await api.listPipelines());
         } catch {
@@ -56,18 +112,19 @@ export default function App() {
     }
 
     async function refresh(id) {
+        const p = await api.getPipeline(id);
 
-        const p =
-            await api.getPipeline(id);
-
+        if (selectedRef.current !== id) return;
         setPipeline(p);
 
         try {
-            setAudit(await api.audit(id));
+            const records = await api.audit(id);
+            if (selectedRef.current === id) setAudit(records);
         } catch {}
 
         try {
-            setGithub(await api.github(id));
+            const view = await api.github(id);
+            if (selectedRef.current === id) setGithub(view);
         } catch {}
 
         refreshList();
@@ -77,519 +134,212 @@ export default function App() {
         }
     }
 
-    async function onScenarioChange(next) {
-
-        setScenario(next);
-
-        await api.setScenario(next);
-    }
-
-    async function runDemo() {
-
+    function connect(id) {
         sourceRef.current?.close();
         clearInterval(pollRef.current);
-
+        selectedRef.current = id;
         setEvents([]);
+        sourceRef.current = streamEvents(id, (event) => {
+            if (selectedRef.current !== id) return;
+            setEvents((previous) => [...previous, event]);
+            refresh(id).catch((err) => setError(err));
+        });
+        pollRef.current = setInterval(() => refresh(id).catch((err) => setError(err)), 1000);
+    }
 
-        const p =
-            await api.runDemo();
+    async function perform(action, name) {
+        if (actionRef.current) return;
+        actionRef.current = true;
+        setBusy(true);
+        setPendingAction(name);
+        setError('');
+        try {
+            await action();
+        } catch (err) {
+            setError(err);
+        } finally {
+            actionRef.current = false;
+            setBusy(false);
+            setPendingAction('');
+        }
+    }
 
-        setPipeline(p);
+    async function runIssue(key = selectedIssue) {
+        await perform(async () => {
+            sourceRef.current?.close();
+            clearInterval(pollRef.current);
+            setEvents([]);
+            const p = await api.runDemo(key);
+            api.status().then(setStatus).catch(() => {});
 
-        refresh(p.id);
-
-        sourceRef.current =
-            streamEvents(
-                p.id,
-                (evt) => {
-
-                    setEvents(prev => [
-                        ...prev,
-                        evt
-                    ]);
-
-                    refresh(p.id);
-                }
-            );
-
-        pollRef.current =
-            setInterval(
-                () => refresh(p.id),
-                1000
-            );
+            setSelectedIssue(key);
+            setNav('dashboard');
+            setPipeline(p);
+            setAudit([]);
+            setGithub(null);
+            connect(p.id);
+            await refresh(p.id);
+        }, 'run');
     }
 
     async function approve() {
-
-        await api.approve(
-            pipeline.id
-        );
-
-        refresh(pipeline.id);
+        await perform(async () => {
+            await api.approve(pipeline.id);
+            await refresh(pipeline.id);
+        }, 'approve');
     }
 
     async function reject() {
-
-        await api.reject(
-            pipeline.id
-        );
-
-        refresh(pipeline.id);
+        await perform(async () => {
+            await api.reject(pipeline.id);
+            await refresh(pipeline.id);
+        }, 'reject');
     }
 
     async function clarify(answers) {
-
-        if (!api.clarify) {
-            return;
-        }
-
-        await api.clarify(
-            pipeline.id,
-            answers
-        );
-
-        refresh(pipeline.id);
+        await perform(async () => {
+            await api.clarify(pipeline.id, answers);
+            await refresh(pipeline.id);
+        }, 'clarify');
     }
 
-    const live =
-        status?.aiMode === 'LIVE';
+    async function changeMode(mode) {
+        await perform(async () => setStatus(await api.setMode(mode)), 'mode');
+    }
+
+    async function submitReviewFeedback(feedback) {
+        await perform(async () => {
+            await api.reviewFeedback(pipeline.id, feedback);
+            await refresh(pipeline.id);
+        }, 'review-feedback');
+    }
+
+    const runStatus = pipeline
+        ? { ...status, aiMode: pipeline.aiMode,
+            provider: pipeline.aiMode === 'DEMO' ? 'DEMO' : status?.liveProvider || status?.provider }
+        : status;
+
+    const running =
+        ACTIVE_STATES.includes(pipeline?.state) ||
+        (pipeline?.state === 'REQUIREMENTS_READY' &&
+            !pipeline?.requirementAnalysis?.clarificationQuestions?.length);
 
     return (
-        <div className="flex h-screen bg-ink text-slate-100">
-
-            <Sidebar
-                active={nav}
-                onSelect={setNav}
-            />
-
-            <main className="flex-1 flex flex-col min-w-0">
-
-                <header className="flex items-center justify-between px-6 py-3 border-b border-edge bg-panel">
-
-                    <div>
-
-                        <div className="text-sm text-slate-400">
-                            Ubuntu Bank · Delivery Pipeline
-                        </div>
-
-                        <div className="text-lg font-semibold">
-                            {
-                                pipeline
-                                    ? `${pipeline.ticket.key} — ${pipeline.ticket.title}`
-                                    : 'UB-4821 — High Value Transaction Notification'
-                            }
-                        </div>
-
-                    </div>
-
-                    <div className="flex items-center gap-3">
-
-                        <span
-                            className={`text-xs px-3 py-1.5 rounded-full font-semibold ${
-                                live
-                                    ? 'bg-accent/20 text-accent'
-                                    : 'bg-ok/20 text-ok'
-                            }`}
-                        >
-                            {live
-                                ? '● LIVE AI MODE'
-                                : '● DEMO MODE'}
-                        </span>
-
-                        <select
-                            value={scenario}
-                            onChange={(e) =>
-                                onScenarioChange(
-                                    e.target.value
-                                )
-                            }
-                            className="bg-panel2 border border-edge rounded-md px-3 py-1.5 text-sm"
-                        >
-                            {(status?.scenarios || [scenario])
-                                .map((s) => (
-                                    <option key={s}>
-                                        {s}
-                                    </option>
-                                ))}
-                        </select>
-
-                        <button
-                            onClick={runDemo}
-                            className="bg-accent px-4 py-1.5 rounded-md text-white"
-                        >
-                            ▶ Run Pipeline
-                        </button>
-
-                    </div>
-
-                </header>
-
-                <div className="flex-1 flex overflow-hidden">
-
-                    <section className="flex-1 overflow-y-auto p-6 space-y-6">
-
-                        {nav === 'dashboard' && (
+        <TooltipProvider delayDuration={200}>
+            <div className="flex min-h-screen bg-background text-foreground">
+                <div className="sticky top-0 hidden h-screen w-[200px] shrink-0 border-r lg:block">
+                    <Sidebar active={nav} onSelect={setNav} status={status} onMode={changeMode} pending={busy} />
+                </div>
+                <main className="min-w-0 flex-1">
+                    <div className="mx-auto w-full max-w-[1360px] px-5 pb-10 sm:px-8 xl:px-10">
+                        <PageHeader
+                            pipeline={pipeline}
+                            status={status}
+                            issue={issues.find((issue) => issue.key === selectedIssue)}
+                            onRun={() => runIssue()}
+                            pending={busy}
+                            action={pendingAction}
+                            events={events}
+                            nav={nav}
+                            onNavigate={setNav}
+                            onMode={changeMode}
+                            presentationPace={presentationPace}
+                            onPresentationPace={setPresentationPace}
+                            followLatest={followLatest}
+                            onFollowLatest={setFollowLatest}
+                        />
+                        {loading ? (
+                            <div aria-label="Loading pipeline" className="space-y-6 py-8">
+                                <Skeleton className="h-20 w-full" />
+                                <Skeleton className="h-4 w-3/4" />
+                                <Skeleton className="h-4 w-1/2" />
+                            </div>
+                        ) : nav === 'dashboard' ? (
                             <>
-                                <PipelineStages
-                                    state={pipeline?.state}
+                                <PipelineStages pipeline={displayedPipeline} events={visibleEvents} />
+                                <div className="my-6">
+                                    <PipelineAlert
+                                        pipeline={pipeline}
+                                        events={events}
+                                        error={error}
+                                    />
+                                </div>
+                                <div className="mb-1 flex items-center justify-between gap-3">
+                                    <div className="flex flex-wrap items-center gap-3">
+                                        <h2 className="text-xs font-medium text-muted-foreground">Agent outputs</h2>
+                                        {paced && <Button variant="outline" size="sm" onClick={skip} disabled={skipped || !entries.length}>
+                                            {skipped ? 'Delays skipped for this run' : 'Skip remaining delays'}
+                                        </Button>}
+                                    </div>
+                                    {pipeline && (
+                                        <span
+                                            title={pipeline.id}
+                                            className="font-mono text-[10px] text-muted-foreground/65"
+                                        >
+                                            Run {pipeline.id.slice(0, 8)}
+                                        </span>
+                                    )}
+                                </div>
+                                <div ref={outputRef}>
+                                <RequirementsResult
+                                    pipeline={displayedPipeline}
+                                    actionPipeline={pipeline}
+                                    activity={activity('Rhea')}
+                                    pending={busy}
+                                    onClarify={clarify}
+                                    events={visibleEvents}
+                                    status={runStatus}
                                 />
-
-                                <div className="grid xl:grid-cols-2 gap-6">
-
-                                    <Panel title="🔍 Rhea · Requirement Analysis">
-
-                                        {pipeline?.requirementAnalysis ? (
-                                            <Requirements
-                                                analysis={pipeline.requirementAnalysis}
-                                                awaiting={
-                                                    pipeline.state === 'REQUIREMENTS_READY'
-                                                    &&
-                                                    pipeline.requirementAnalysis.clarificationQuestions?.length > 0
-                                                }
-                                                onClarify={clarify}
-                                            />
-                                        ) : (
-                                            <Empty text="No analysis yet." />
-                                        )}
-
-                                    </Panel>
-
-                                    <Panel title="💻 Nova · Code Proposal">
-
-                                        <DiffViewer
-                                            diff={
-                                                pipeline?.codeChangeSet?.unifiedDiff
-                                            }
-                                        />
-
-                                    </Panel>
-
-                                    <Panel title="🛡️ Sentinel · Review">
-
-                                        <Findings
-                                            review={
-                                                pipeline?.reviewDecision
-                                            }
-                                        />
-
-                                    </Panel>
-
-                                    <Panel title="🚀 Atlas · Deploy">
-
+                                <CodeProposal pipeline={displayedPipeline} events={visibleEvents} status={runStatus} activity={activity('Nova')} />
+                                <div className="min-w-0 divide-y">
+                                    <Findings
+                                        review={displayedPipeline?.reviewDecision}
+                                        running={displayedPipeline?.state === 'REVIEWING'}
+                                        mode={pipeline?.aiMode || status?.aiMode}
+                                        pipeline={displayedPipeline}
+                                        actionPipeline={pipeline}
+                                        activity={activity('Sentinel')}
+                                        pending={busy}
+                                        onReviewFeedback={submitReviewFeedback}
+                                        feedbackHistory={audit}
+                                        events={visibleEvents}
+                                        status={runStatus}
+                                    />
+                                    <div>
                                         <ApprovalPanel
-                                            pipeline={pipeline}
+                                            pipeline={displayedPipeline}
+                                            actionPipeline={pipeline}
+                                            activity={activity('Atlas')}
                                             onApprove={approve}
                                             onReject={reject}
+                                            pending={busy}
+                                            action={pendingAction}
+                                            events={visibleEvents}
                                         />
-
-                                    </Panel>
-
+                                    </div>
+                                </div>
                                 </div>
                             </>
+                        ) : (
+                            <>
+                                <PipelineAlert error={error} />
+                                <WorkspaceViews
+                                    nav={nav}
+                                    pipelines={pipelines}
+                                    issues={issues}
+                                    onRunIssue={runIssue}
+                                    running={running}
+                                    pending={busy}
+                                    github={github}
+                                    pipeline={pipeline}
+                                    audit={audit}
+                                    status={runStatus}
+                                />
+                            </>
                         )}
-
-                        {nav === 'issues' && (
-                            <IssuesView
-                                pipelines={pipelines}
-                            />
-                        )}
-
-                        {nav === 'agents' && (
-                            <AgentsView />
-                        )}
-
-                        {nav === 'pulls' && (
-                            <PullRequestsView
-                                github={github}
-                            />
-                        )}
-
-                        {nav === 'deployments' && (
-                            <DeploymentsView
-                                pipeline={pipeline}
-                            />
-                        )}
-
-                        {nav === 'audit' && (
-                            <AuditView
-                                audit={audit}
-                                pipeline={pipeline}
-                                live={live}
-                            />
-                        )}
-
-                    </section>
-
-                    <section className="w-96 border-l border-edge bg-panel">
-
-                        <AgentActivity
-                            events={events}
-                        />
-
-                    </section>
-
-                </div>
-
-            </main>
-
-        </div>
-    );
-}
-
-/* ---------------- Shared UI ---------------- */
-
-function Panel({ title, children }) {
-    return (
-        <div className="rounded-xl border border-edge bg-panel p-4">
-            <div className="text-sm font-semibold mb-3">
-                {title}
-            </div>
-            {children}
-        </div>
-    );
-}
-
-function Empty({ text }) {
-    return (
-        <div className="text-slate-500 text-sm">
-            {text}
-        </div>
-    );
-}
-
-function Requirements({
-                          analysis,
-                          awaiting,
-                          onClarify
-                      }) {
-    return (
-        <div className="space-y-3">
-
-            <p className="text-slate-300">
-                {analysis.summary}
-            </p>
-
-            {analysis.acceptanceCriteria?.length > 0 && (
-                <List
-                    title="Acceptance Criteria"
-                    items={analysis.acceptanceCriteria}
-                />
-            )}
-
-            {analysis.complianceConcerns?.length > 0 && (
-                <List
-                    title="Compliance Concerns"
-                    items={analysis.complianceConcerns}
-                />
-            )}
-
-            {analysis.clarificationQuestions?.length > 0 && (
-                <List
-                    title="Clarification Questions"
-                    items={analysis.clarificationQuestions}
-                />
-            )}
-
-            {awaiting && (
-                <ClarificationForm
-                    questions={analysis.clarificationQuestions}
-                    onSubmit={onClarify}
-                />
-            )}
-        </div>
-    );
-}
-
-function List({ title, items }) {
-    return (
-        <div>
-            <div className="text-xs uppercase text-slate-400 mb-1">
-                {title}
-            </div>
-
-            <ul className="list-disc ml-5 text-sm space-y-1">
-                {items.map((i, idx) => (
-                    <li key={idx}>{i}</li>
-                ))}
-            </ul>
-        </div>
-    );
-}
-
-function ClarificationForm({ questions, onSubmit }) {
-
-    const [answers, setAnswers] =
-        useState(() =>
-            questions.map(() => '')
-        );
-
-    const update = (i, value) =>
-        setAnswers(prev =>
-            prev.map((a, idx) =>
-                idx === i ? value : a
-            )
-        );
-
-    return (
-        <div className="rounded-lg border border-warn/40 bg-warn/5 p-3">
-
-            <div className="text-xs text-warn font-semibold mb-2">
-                Rhea needs clarification
-            </div>
-
-            {questions.map((q, i) => (
-                <div key={i} className="mb-2">
-
-                    <div className="text-sm mb-1">
-                        {q}
                     </div>
-
-                    <input
-                        className="w-full bg-panel2 border border-edge rounded px-2 py-1"
-                        value={answers[i]}
-                        onChange={(e) =>
-                            update(i, e.target.value)
-                        }
-                    />
-
-                </div>
-            ))}
-
-            <button
-                onClick={() => onSubmit(answers)}
-                className="bg-accent px-4 py-2 rounded"
-            >
-                Submit clarifications & resume
-            </button>
-
-        </div>
-    );
-}
-
-function IssuesView({ pipelines }) {
-    return (
-        <Panel title="◉ Issues">
-            {pipelines.length ? (
-                <table className="w-full text-sm">
-                    <thead>
-                    <tr>
-                        <th>Ticket</th>
-                        <th>Scenario</th>
-                        <th>State</th>
-                    </tr>
-                    </thead>
-                    <tbody>
-                    {pipelines.map((p) => (
-                        <tr key={p.id}>
-                            <td>{p.ticket.key}</td>
-                            <td>{p.scenario}</td>
-                            <td>{p.state}</td>
-                        </tr>
-                    ))}
-                    </tbody>
-                </table>
-            ) : (
-                <Empty text="No pipelines yet." />
-            )}
-        </Panel>
-    );
-}
-
-function AgentsView() {
-    const agents = [
-        ['🔍', 'Rhea', 'Requirements Analyst'],
-        ['💻', 'Nova', 'Senior Java Engineer'],
-        ['🛡️', 'Sentinel', 'Security & Compliance Architect'],
-        ['🚀', 'Atlas', 'Release Manager']
-    ];
-
-    return (
-        <Panel title="⬡ AI Agents">
-            {agents.map(([e,n,r]) => (
-                <div key={n} className="mb-3">
-                    <div>{e} {n}</div>
-                    <div className="text-slate-400 text-sm">{r}</div>
-                </div>
-            ))}
-        </Panel>
-    );
-}
-
-function PullRequestsView({ github }) {
-    return (
-        <Panel title="⇄ Pull Requests">
-            {github?.pullRequest
-                ? <DiffViewer diff={github.pullRequest.diff} />
-                : <Empty text="No pull request yet." />
-            }
-        </Panel>
-    );
-}
-
-function DeploymentsView({ pipeline }) {
-    return (
-        <Panel title="🚀 Deployments">
-            <div>{pipeline?.state || 'No deployment yet.'}</div>
-        </Panel>
-    );
-}
-
-function AuditView({ audit, pipeline, live }) {
-
-    return (
-        <Panel
-            title={
-                live
-                    ? '📜 Audit Trail (Live)'
-                    : '📜 Audit Trail'
-            }
-        >
-
-            {audit.length ? (
-
-                <div className="space-y-2">
-
-                    {audit.map((e) => (
-
-                        <div
-                            key={`${e.id}-${e.createdAt}`}
-                            className="flex gap-3 text-sm border-b border-edge pb-2"
-                        >
-
-                            <span className="text-xs text-slate-500 w-28 shrink-0">
-                                {new Date(e.createdAt).toLocaleTimeString()}
-                            </span>
-
-                            <span className="font-semibold text-slate-200 w-24 shrink-0">
-                                {e.agent}
-                            </span>
-
-                            <span className="text-slate-300">
-                                {e.action}
-                                {' → '}
-                                <span className="text-accent">
-                                    {e.decision}
-                                </span>
-
-                                {e.policyOutcome ? (
-                                    <span className="text-slate-500">
-                                        {' · '}
-                                        {e.policyOutcome}
-                                    </span>
-                                ) : null}
-
-                            </span>
-
-                        </div>
-
-                    ))}
-
-                </div>
-
-            ) : (
-                <Empty text="No audit events yet." />
-            )}
-
-        </Panel>
+                </main>
+            </div>
+        </TooltipProvider>
     );
 }

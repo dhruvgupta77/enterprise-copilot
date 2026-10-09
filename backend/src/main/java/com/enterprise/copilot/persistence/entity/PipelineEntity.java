@@ -17,8 +17,7 @@ import java.util.UUID;
 @Table(name = "pipelines")
 public class PipelineEntity {
 
-    @Id
-    private UUID id;
+    @Id private UUID id;
 
     @Column(name = "ticket_key", nullable = false)
     private String ticketKey;
@@ -57,6 +56,9 @@ public class PipelineEntity {
     @Column(name = "review_json", columnDefinition = "text")
     private String reviewJson;
 
+    @Column(name = "review_feedback", columnDefinition = "text")
+    private String reviewFeedback;
+
     @Column(name = "deployment_json", columnDefinition = "text")
     private String deploymentJson;
 
@@ -66,8 +68,7 @@ public class PipelineEntity {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
-    protected PipelineEntity() {
-    }
+    protected PipelineEntity() {}
 
     public PipelineEntity(UUID id) {
         this.id = id;
@@ -167,6 +168,14 @@ public class PipelineEntity {
 
     public String getDeploymentJson() {
         return deploymentJson;
+    }
+
+    public String getReviewFeedback() {
+        return reviewFeedback;
+    }
+
+    public void setReviewFeedback(String feedback) {
+        this.reviewFeedback = feedback;
     }
 
     public void setDeploymentJson(String v) {

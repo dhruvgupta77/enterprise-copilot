@@ -1,28 +1,14 @@
-# OpenAI LIVE profile.
-#
-# Azure support is enabled by adding the Spring AI Azure OpenAI starter to backend/pom.xml:
-#
-#   <dependency>
-#       <groupId>org.springframework.ai</groupId>
-#       <artifactId>spring-ai-starter-model-azure-openai</artifactId>
-#   </dependency>
-#
-# The starter autoconfigures a ChatModel from the properties below, which SpringAiAgentAiClient
-# consumes unchanged. Never commit secrets — supply them via environment variables.
+# Default OpenAI LIVE profile. The key is read per run from OPENAI_API_KEY or the project .env.
 
 spring:
   config:
     activate:
       on-profile: openai
-  ai:
-    model:
-      chat: openai
-    openai:
-      api-key: ${OPENAI_API_KEY:demo-key-not-used}
-      chat:
-        options:
-          model: ${OPENAI_MODEL:gpt-4o-mini}
 
 copilot:
   ai:
     mode: LIVE
+  demo:
+    # Provider latency already paces LIVE runs.
+    step-delay-ms: ${COPILOT_STEP_DELAY_MS:250}
+    activity-delay-ms: ${COPILOT_ACTIVITY_DELAY_MS:250}

@@ -18,10 +18,10 @@ public record PipelineResponse(
         RequirementAnalysis requirementAnalysis,
         CodeChangeSet codeChangeSet,
         ReviewDecision reviewDecision,
+        String reviewFeedback,
         DeploymentDecision deploymentDecision,
         Instant createdAt,
-        Instant updatedAt
-) {
+        Instant updatedAt) {
 
     public static PipelineResponse from(PipelineContext ctx) {
         return new PipelineResponse(
@@ -34,9 +34,9 @@ public record PipelineResponse(
                 ctx.requirementAnalysis(),
                 ctx.codeChangeSet(),
                 ctx.reviewDecision(),
+                ctx.reviewFeedback(),
                 ctx.deploymentDecision(),
                 ctx.createdAt(),
-                ctx.updatedAt()
-        );
+                ctx.updatedAt());
     }
 }

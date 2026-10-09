@@ -27,9 +27,7 @@ public class PipelineStore {
     private final PipelineRepository repository;
     private final ObjectMapper objectMapper;
 
-    public PipelineStore(
-            PipelineRepository repository,
-            ObjectMapper objectMapper) {
+    public PipelineStore(PipelineRepository repository, ObjectMapper objectMapper) {
 
         this.repository = repository;
         this.objectMapper = objectMapper;
@@ -38,14 +36,15 @@ public class PipelineStore {
     public void save(PipelineContext ctx) {
 
         PipelineEntity e =
-                repository.findById(ctx.pipelineId())
-                        .orElseGet(() -> {
-                            PipelineEntity fresh =
-                                    new PipelineEntity(ctx.pipelineId());
+                repository
+                        .findById(ctx.pipelineId())
+                        .orElseGet(
+                                () -> {
+                                    PipelineEntity fresh = new PipelineEntity(ctx.pipelineId());
 
-                            fresh.setCreatedAt(ctx.createdAt());
-                            return fresh;
-                        });
+                                    fresh.setCreatedAt(ctx.createdAt());
+                                    return fresh;
+                                });
 
         Ticket t = ctx.ticket();
 
@@ -60,17 +59,14 @@ public class PipelineStore {
         e.setState(ctx.state());
         e.setApprovalState(ctx.approvalState());
 
-        e.setAnalysisJson(
-                toJson(ctx.requirementAnalysis()));
+        e.setAnalysisJson(toJson(ctx.requirementAnalysis()));
 
-        e.setCodeJson(
-                toJson(ctx.codeChangeSet()));
+        e.setCodeJson(toJson(ctx.codeChangeSet()));
 
-        e.setReviewJson(
-                toJson(ctx.reviewDecision()));
+        e.setReviewJson(toJson(ctx.reviewDecision()));
+        e.setReviewFeedback(ctx.reviewFeedback());
 
-        e.setDeploymentJson(
-                toJson(ctx.deploymentDecision()));
+        e.setDeploymentJson(toJson(ctx.deploymentDecision()));
 
         e.setUpdatedAt(Instant.now());
 
@@ -78,8 +74,7 @@ public class PipelineStore {
     }
 
     public Optional<PipelineContext> load(UUID id) {
-        return repository.findById(id)
-                .map(this::toContext);
+        return repository.findById(id).map(this::toContext);
     }
 
     public List<PipelineEntity> listAll() {
@@ -92,37 +87,25 @@ public class PipelineStore {
                 new PipelineContext(
                         e.getId(),
                         new Ticket(
-                                e.getTicketKey(),
-                                e.getTitle(),
-                                e.getDescription(),
-                                e.getSource()),
+                                e.getTicketKey(), e.getTitle(), e.getDescription(), e.getSource()),
                         e.getScenario(),
-                        e.getAiMode());
+                        e.getAiMode(),
+                        e.getCreatedAt());
 
         ctx.setState(e.getState());
 
-        ctx.setApprovalState(
-                e.getApprovalState());
+        ctx.setApprovalState(e.getApprovalState());
 
-        ctx.setRequirementAnalysis(
-                fromJson(
-                        e.getAnalysisJson(),
-                        RequirementAnalysis.class));
+        ctx.setRequirementAnalysis(fromJson(e.getAnalysisJson(), RequirementAnalysis.class));
 
-        ctx.setCodeChangeSet(
-                fromJson(
-                        e.getCodeJson(),
-                        CodeChangeSet.class));
+        ctx.setCodeChangeSet(fromJson(e.getCodeJson(), CodeChangeSet.class));
 
-        ctx.setReviewDecision(
-                fromJson(
-                        e.getReviewJson(),
-                        ReviewDecision.class));
+        ctx.setReviewDecision(fromJson(e.getReviewJson(), ReviewDecision.class));
+        ctx.setReviewFeedback(e.getReviewFeedback());
 
-        ctx.setDeploymentDecision(
-                fromJson(
-                        e.getDeploymentJson(),
-                        DeploymentDecision.class));
+        ctx.setDeploymentDecision(fromJson(e.getDeploymentJson(), DeploymentDecision.class));
+
+        ctx.restoreUpdatedAt(e.getUpdatedAt());
 
         return ctx;
     }
@@ -139,15 +122,11 @@ public class PipelineStore {
 
         } catch (JsonProcessingException ex) {
 
-            throw new IllegalStateException(
-                    "Failed to serialise pipeline field",
-                    ex);
+            throw new IllegalStateException("Failed to serialise pipeline field", ex);
         }
     }
 
-    private <T> T fromJson(
-            String json,
-            Class<T> type) {
+    private <T> T fromJson(String json, Class<T> type) {
 
         if (json == null || json.isBlank()) {
             return null;
@@ -155,15 +134,11 @@ public class PipelineStore {
 
         try {
 
-            return objectMapper.readValue(
-                    json,
-                    type);
+            return objectMapper.readValue(json, type);
 
         } catch (JsonProcessingException ex) {
 
-            throw new IllegalStateException(
-                    "Failed to deserialise pipeline field",
-                    ex);
+            throw new IllegalStateException("Failed to deserialise pipeline field", ex);
         }
     }
 }

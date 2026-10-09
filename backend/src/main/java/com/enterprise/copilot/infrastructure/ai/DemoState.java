@@ -3,37 +3,69 @@ package com.enterprise.copilot.infrastructure.ai;
 import com.enterprise.copilot.domain.AiMode;
 import com.enterprise.copilot.domain.DemoScenario;
 import com.enterprise.copilot.infrastructure.config.CopilotProperties;
+import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Service;
 
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Holds the presenter-controlled runtime state: the active workshop scenario and the AI mode banner.
- * Mutable so the demo controls can switch scenarios live without a restart.
+ * Holds presenter selections for the next run. Each pipeline captures an immutable selection.
  */
 @Service
 public class DemoState {
 
-    private final AtomicReference<DemoScenario> scenario;
-    private final AiMode aiMode;
+    public record Selection(AiMode mode, DemoScenario scenario) {}
 
-    public DemoState(CopilotProperties properties) {
-        this.scenario =
-                new AtomicReference<>(
-                        properties.demo().scenario());
-        this.aiMode =
-                properties.ai().mode();
+    private final AtomicReference<Selection> selection;
+    private final String provider;
+
+    public DemoState(
+            CopilotProperties properties, Environment environment, OpenAiKeyResolver keys) {
+        this.provider = environment.matchesProfiles("ollama") ? "OLLAMA" : "OPENAI";
+        boolean startLive = environment.matchesProfiles("ollama")
+                || (environment.matchesProfiles("openai") && keys.resolve().isPresent());
+        this.selection = new AtomicReference<>(
+            new Selection(startLive ? AiMode.LIVE : AiMode.DEMO, properties.demo().scenario()));
     }
 
     public DemoScenario scenario() {
-        return scenario.get();
+        Selection current = snapshot();
+        return current.mode() == AiMode.DEMO ? current.scenario() : DemoScenario.NORMAL;
     }
 
     public void setScenario(DemoScenario scenario) {
-        this.scenario.set(scenario);
+        selection.updateAndGet(current -> {
+            if (current.mode() != AiMode.DEMO) {
+                throw new IllegalStateException("Scenario selection requires DEMO mode.");
+            }
+            return new Selection(current.mode(), scenario);
+        });
     }
 
     public AiMode aiMode() {
-        return aiMode;
+        return snapshot().mode();
+    }
+
+    public String provider() {
+        return aiMode() == AiMode.DEMO ? "DEMO" : provider;
+    }
+
+    public Selection snapshot() {
+        return selection.get();
+    }
+
+    public boolean liveAvailable() {
+        return true;
+    }
+
+    public String liveProvider() {
+        return provider;
+    }
+
+    public void setMode(AiMode mode) {
+        if (mode == null) {
+            throw new IllegalArgumentException("Select DEMO or LIVE.");
+        }
+        selection.updateAndGet(current -> new Selection(mode, current.scenario()));
     }
 }
